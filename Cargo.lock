@@ -826,16 +826,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rusttuisynth"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cpal",
- "crossterm",
- "ratatui",
-]
-
-[[package]]
 name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1024,6 +1014,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
 dependencies = [
  "winnow",
+]
+
+[[package]]
+name = "tuibeat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "crossterm",
+ "ratatui",
 ]
 
 [[package]]
