@@ -2,6 +2,7 @@ mod app;
 mod audio;
 mod drums;
 mod effects;
+mod scale;
 mod sequencer;
 mod synth;
 mod ui;
@@ -79,9 +80,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, enhanced: bool) ->
                     // ── Key repeat ────────────────────────────────────────
                     if key.kind == KeyEventKind::Repeat {
                         match key.code {
-                            // Global BPM
+                            // Global BPM + scale
                             KeyCode::PageUp   => app.bpm_up(),
                             KeyCode::PageDown => app.bpm_down(),
+                            KeyCode::F(6)     => app.cycle_scale(),
+                            KeyCode::F(7)     => app.cycle_scale_root(),
 
                             // Effects focus: navigation + param adjust (no Space repeat)
                             KeyCode::Up    if app.mode == AppMode::Effects => app.effects_sel_up(),
@@ -146,11 +149,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, enhanced: bool) ->
                         KeyCode::Esc => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
 
-                        // Global: cycle focus, waveform, drum play, BPM
+                        // Global: cycle focus, waveform, drum play, BPM, scale
                         KeyCode::Tab          => app.toggle_mode(),
                         KeyCode::F(2)         => app.toggle_mode(),
                         KeyCode::F(1)         => app.cycle_wave(),
                         KeyCode::F(3)         => app.drum_toggle_play(),
+                        KeyCode::F(6)         => app.cycle_scale(),
+                        KeyCode::F(7)         => app.cycle_scale_root(),
                         KeyCode::PageUp       => app.bpm_up(),
                         KeyCode::PageDown     => app.bpm_down(),
 

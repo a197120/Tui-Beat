@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::scale::{Scale, ScaleQuantizer};
 use crate::synth::{Synth, note_name};
 
 const FALLBACK_RELEASE_THRESHOLD: Duration = Duration::from_millis(600);
@@ -72,6 +73,9 @@ pub struct App {
     // Effects panel cursors
     pub effects_sel:   usize,  // 0=Reverb 1=Delay 2=Distortion
     pub effects_param: usize,  // 0-2 = effect param; 3-5 = S1/S2/DR send level
+
+    // Scale quantizer (input layer — no audio thread involvement)
+    pub scale_q: ScaleQuantizer,
 }
 
 impl App {
@@ -91,6 +95,7 @@ impl App {
             drum_step:    0,
             effects_sel:   0,
             effects_param: 0,
+            scale_q:       ScaleQuantizer::new(),
         }
     }
 
@@ -100,14 +105,14 @@ impl App {
         if self.pressed_keys.contains(&key) { return; }
         self.pressed_keys.insert(key);
         if let Some(note) = key_to_note(key, self.base_octave) {
-            self.synth.lock().unwrap().note_on(note);
+            self.synth.lock().unwrap().note_on(self.scale_q.quantize(note));
         }
     }
 
     pub fn key_release(&mut self, key: char) {
         if !self.pressed_keys.remove(&key) { return; }
         if let Some(note) = key_to_note(key, self.base_octave) {
-            self.synth.lock().unwrap().note_off(note);
+            self.synth.lock().unwrap().note_off(self.scale_q.quantize(note));
         }
     }
 
@@ -116,7 +121,7 @@ impl App {
         if self.pressed_keys.contains(&key) { return; }
         self.pressed_keys.insert(key);
         if let Some(note) = key_to_note(key, self.base_octave) {
-            self.synth.lock().unwrap().note_on(note);
+            self.synth.lock().unwrap().note_on(self.scale_q.quantize(note));
         }
     }
 
@@ -206,6 +211,26 @@ impl App {
         self.status_msg = format!("BPM: {:.0}", s.bpm);
     }
 
+    pub fn cycle_scale(&mut self) {
+        self.release_all();
+        self.scale_q.scale = self.scale_q.scale.next();
+        self.status_msg = if self.scale_q.scale == Scale::Off {
+            "Scale: Off".to_string()
+        } else {
+            format!("Scale: {} {}", self.scale_q.root_name(), self.scale_q.scale.name())
+        };
+    }
+
+    pub fn cycle_scale_root(&mut self) {
+        self.release_all();
+        self.scale_q.cycle_root();
+        self.status_msg = if self.scale_q.scale == Scale::Off {
+            format!("Root: {}", self.scale_q.root_name())
+        } else {
+            format!("Scale: {} {}", self.scale_q.root_name(), self.scale_q.scale.name())
+        };
+    }
+
     pub fn refresh_active_notes(&mut self) {
         self.active_notes = self.synth.lock().unwrap().active_notes();
     }
@@ -274,7 +299,8 @@ impl App {
     }
 
     pub fn seq_set_note(&mut self, key: char) {
-        let Some(note) = key_to_note(key, self.base_octave) else { return };
+        let Some(raw) = key_to_note(key, self.base_octave) else { return };
+        let note = self.scale_q.quantize(raw);
         let cursor = self.seq_cursor;
         let n = {
             let mut s = self.synth.lock().unwrap();
@@ -320,7 +346,8 @@ impl App {
     }
 
     pub fn seq2_set_note(&mut self, key: char) {
-        let Some(note) = key_to_note(key, self.base_octave) else { return };
+        let Some(raw) = key_to_note(key, self.base_octave) else { return };
+        let note = self.scale_q.quantize(raw);
         let cursor = self.seq2_cursor;
         let n = {
             let mut s = self.synth.lock().unwrap();

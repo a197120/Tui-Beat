@@ -818,6 +818,18 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let notes_s = if notes.is_empty() { "—".to_string() } else { notes.join(" ") };
     let extra   = if app.status_msg.is_empty() { String::new() } else { format!("  │  {}", app.status_msg) };
 
+    let scale_active = app.scale_q.active();
+    let scale_str = if scale_active {
+        format!("{} {}", app.scale_q.root_name(), app.scale_q.scale.name())
+    } else {
+        "Off".to_string()
+    };
+    let scale_style = if scale_active {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
     let text = vec![
         Line::from(vec![
             Span::styled("Wave: ",   Style::default().fg(Color::DarkGray)),
@@ -829,6 +841,9 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             Span::styled("Vol: ",    Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{:.0}%", vol * 100.0),
                          Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw("  │  "),
+            Span::styled("Scale: ",  Style::default().fg(Color::DarkGray)),
+            Span::styled(scale_str,  scale_style),
             Span::styled(&extra,     Style::default().fg(Color::Yellow)),
         ]),
         Line::from(vec![
@@ -906,6 +921,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[F1] ",     w), Span::raw("Waveform  │  "),
         Span::styled("[F3] ",     w), Span::raw("Drum play/stop  │  "),
         Span::styled("[PgUp/Dn] ",w), Span::raw("BPM  │  "),
+        Span::styled("[F6] ",     w), Span::raw("Scale  │  "),
+        Span::styled("[F7] ",     w), Span::raw("Root  │  "),
         Span::styled("[Esc] ",    w), Span::raw("Quit"),
     ]);
 

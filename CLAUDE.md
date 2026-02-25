@@ -20,6 +20,7 @@ No tests exist yet. Build with `cargo build`, run with `cargo run`.
 | `sequencer.rs` | Melodic step sequencer (sample-accurate) |
 | `drums.rs` | 8-track drum machine with synthesized voices |
 | `effects.rs` | `AudioEffect` trait + `EffectChain`; also `BiquadFilter` + `FilterMode` |
+| `scale.rs` | `Scale` enum + `ScaleQuantizer`; nearest-neighbor MIDI note quantization |
 | `ui.rs` | All Ratatui rendering; one function per panel |
 
 ## Architecture
@@ -91,7 +92,7 @@ Inactive panels have a dim border but are always rendered.
 | `Effects` | select effect | select param | route 0↔100% | — |
 
 **Global keys** (any focus): Tab/F2 cycle focus, F1 waveform,
-F3 drum play/stop, PageUp/PageDown BPM ±5, Esc quit.
+F3 drum play/stop, PageUp/PageDown BPM ±5, F6 cycle scale, F7 cycle root, Esc quit.
 
 In **Drums focus**:
 - `-`/`=` adjust per-track volume (0–100%)
@@ -215,6 +216,39 @@ voice mix (polyphony-normalised) → BiquadFilter → EffectChain → FX sends
 - Removing `bpm` from `Sequencer` and passing it at call-site was deliberate so BPM is
   controlled from one place (`Synth::bpm`)
 
+## Scale quantize (`scale.rs`)
+
+`ScaleQuantizer` lives on `App` (not inside `Synth`) — it is a pure input-layer transform
+with no audio thread involvement. It snaps any MIDI note to the nearest in-scale note
+before it reaches `note_on`/`set_step`.
+
+```rust
+pub enum Scale {
+    Off, Major, Minor, PentaMajor, PentaMinor, Blues, Dorian, Mixolydian,
+}
+
+pub struct ScaleQuantizer {
+    pub scale: Scale,   // Scale::Off = bypass (default)
+    pub root:  u8,      // 0 = C … 11 = B
+}
+```
+
+`quantize(note: u8) -> u8` finds the nearest interval using `rem_euclid(12)` distance,
+checking the current octave and ±1 octave for wrap-around, then clamps to 0–127.
+Returns the input unchanged when `scale == Scale::Off`.
+
+**Applied at all note-entry points in `app.rs`:**
+- `key_press` / `key_release` / `key_press_fallback` (keyboard play)
+- `seq_set_note` / `seq2_set_note` (sequencer step entry)
+
+**Controls:**
+- **F6** — cycle scale (Off → Major → Minor → Penta Maj → Penta Min → Blues → Dorian → Mix → Off)
+- **F7** — cycle root note (C → C# → D … → B → C)
+- Both are global (work in any focus), press and repeat
+
+**Status bar** shows `Scale: C Maj` (yellow+bold when active, gray `Off` when inactive).
+`status_msg` is updated on each F6/F7 press.
+
 ## UI (`ui.rs`)
 
 ```
@@ -224,7 +258,7 @@ SynthSeq grid
 SynthSeq2 grid
 Drum grid
 Effects panel
-Status (4 lines)   — wave, BPM, volume, playing notes
+Status (4 lines)   — wave, BPM, volume, scale, playing notes
 Scope (6 lines)    — braille oscilloscope
 Help (remaining)   — mode-specific key hints
 ```
