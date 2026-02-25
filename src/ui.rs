@@ -896,7 +896,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
             Span::styled("[\\ ] ", w),  Span::raw("Mute  │  "),
             Span::styled("[Del] ",  w), Span::raw("Clear  │  "),
             Span::styled("[p/[] ", w),  Span::raw("Prob +/-25%  │  "),
-            Span::styled("[e] ",    w), Span::raw("Euclidean fill"),
+            Span::styled("[e] ",    w), Span::raw("Euclidean fill  │  "),
+            Span::styled("[</>] ",  w), Span::raw("Swing ±5%"),
         ]),
         AppMode::Effects => Line::from(vec![
             Span::styled("[↑↓] ", w), Span::raw("Select effect (row 4=Sidechain)  │  "),
