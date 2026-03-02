@@ -81,11 +81,21 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, enhanced: bool) ->
                     // ── Key repeat ────────────────────────────────────────
                     if key.kind == KeyEventKind::Repeat {
                         match key.code {
-                            // Global BPM + scale
+                            // Global BPM + scale + chord
                             KeyCode::PageUp   => app.bpm_up(),
                             KeyCode::PageDown => app.bpm_down(),
                             KeyCode::F(6)     => app.cycle_scale(),
                             KeyCode::F(7)     => app.cycle_scale_root(),
+                            KeyCode::F(8) => {
+                                if app.mode == AppMode::SynthSeq2 { app.cycle_chord2(); }
+                                else { app.cycle_chord1(); }
+                            }
+                            KeyCode::F(9) => match app.mode {
+                                AppMode::SynthSeq  => { let b = (app.seq1_bank + 1) % 4; app.switch_seq1_bank(b); }
+                                AppMode::SynthSeq2 => { let b = (app.seq2_bank + 1) % 4; app.switch_seq2_bank(b); }
+                                AppMode::Drums     => { let b = (app.drum_bank + 1) % 4; app.switch_drum_bank(b); }
+                                _ => {}
+                            },
 
                             // Effects focus: navigation + param adjust (no Space repeat)
                             KeyCode::Up    if app.mode == AppMode::Effects => app.effects_sel_up(),
@@ -175,13 +185,23 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, enhanced: bool) ->
                             app.input_buf  = "rusttuisynth.json".to_string();
                         }
 
-                        // Global: cycle focus, waveform, drum play, BPM, scale
+                        // Global: cycle focus, waveform, drum play, BPM, scale, chord, bank
                         KeyCode::Tab          => app.toggle_mode(),
                         KeyCode::F(2)         => app.toggle_mode(),
                         KeyCode::F(1)         => app.cycle_wave(),
                         KeyCode::F(3)         => app.drum_toggle_play(),
                         KeyCode::F(6)         => app.cycle_scale(),
                         KeyCode::F(7)         => app.cycle_scale_root(),
+                        KeyCode::F(8) => {
+                            if app.mode == AppMode::SynthSeq2 { app.cycle_chord2(); }
+                            else { app.cycle_chord1(); }
+                        }
+                        KeyCode::F(9) => match app.mode {
+                            AppMode::SynthSeq  => { let b = (app.seq1_bank + 1) % 4; app.switch_seq1_bank(b); }
+                            AppMode::SynthSeq2 => { let b = (app.seq2_bank + 1) % 4; app.switch_seq2_bank(b); }
+                            AppMode::Drums     => { let b = (app.drum_bank + 1) % 4; app.switch_drum_bank(b); }
+                            _ => {}
+                        },
                         KeyCode::PageUp       => app.bpm_up(),
                         KeyCode::PageDown     => app.bpm_down(),
 

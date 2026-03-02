@@ -92,7 +92,8 @@ Inactive panels have a dim border but are always rendered.
 | `Effects` | select effect | select param | route 0↔100% | — |
 
 **Global keys** (any focus): Tab/F2 cycle focus, F1 waveform,
-F3 drum play/stop, PageUp/PageDown BPM ±5, F6 cycle scale, F7 cycle root, Esc quit.
+F3 drum play/stop, PageUp/PageDown BPM ±5, F6 cycle scale, F7 cycle root,
+F8 cycle chord mode (S1; S2 when SynthSeq2 focused), F9 cycle pattern bank (when in SynthSeq/SynthSeq2/Drums focus), Esc quit.
 
 In **Drums focus**:
 - `-`/`=` adjust per-track volume (0–100%)
@@ -106,6 +107,49 @@ Each `DrumTrack` has a `volume: f32` (default 0.85, range 0.0–1.0).
 `DrumMachine::track_volume_up/down(track)` adjust it by ±0.05.
 The volume is displayed in the drum grid as `VVV%` beside the mute indicator.
 `App::drum_vol_up/down()` call through and update `status_msg`.
+
+## Chord mode (`synth.rs`)
+
+`ChordType` enum with 7 variants: `Off`, `Major`, `Minor`, `Maj7`, `Min7`, `Dom7`, `Oct`.
+
+Two fields on `Synth`: `chord1: ChordType` (for bus 1) and `chord2: ChordType` (for bus 2),
+both default to `Off`.
+
+When a note-on fires, `note_on()` inserts the root voice **and** one Voice per semitone
+interval in `ChordType::intervals()`. `note_off()` releases them all. This applies both to
+live keyboard play and to the step sequencer (which now calls `note_on`/`note_off` in
+`generate_sample()` instead of directly inserting into `voices`).
+
+| Variant | Intervals |
+|---------|-----------|
+| Off | none |
+| Major | +4, +7 |
+| Minor | +3, +7 |
+| Maj7 | +4, +7, +11 |
+| Min7 | +3, +7, +10 |
+| Dom7 (7th) | +4, +7, +10 |
+| Oct | +12 |
+
+**Key:** `F8` cycles chord for the focused bus (S1 by default; S2 when SynthSeq2 is focused).
+Panel headers show `Chord: Maj` (yellow+bold when active, cyan+bold for Off).
+Title bar shows `▶C1` / `▶C2` when active.
+
+**Limitation:** if chord type changes mid-held-note, tail chord tones may not release
+perfectly. Negligible for step-sequencer use.
+
+## Pattern banks (`app.rs`)
+
+4 independent pattern slots for Seq1, Seq2, and DrumMachine. Banks are stored on `App`
+(not inside `Synth`) as `[SeqPattern; 4]` / `[DrumPattern; 4]`. The audio thread sees
+only the live Sequencer/DrumMachine; switching banks swaps pattern data under a brief lock.
+
+`SeqPattern` stores `steps` + `num_steps`. `DrumPattern` stores `num_steps`, `swing`, and
+`track_steps` (step probabilities only — kind/muted/volume are global, not per-bank).
+
+**Key:** `F9` in SynthSeq/SynthSeq2/Drums focus cycles to the next bank (wraps 1→2→3→4→1).
+Panel headers show `Bank: N`. Status bar shows "Seq1 Bank: 2" etc. on switch.
+
+Methods: `switch_seq1_bank(n)`, `switch_seq2_bank(n)`, `switch_drum_bank(n)`.
 
 ## Drum machine swing
 
@@ -285,9 +329,11 @@ When the prompt is active, the Help panel shows the file-path overlay; all other
 panels remain visible and the audio thread keeps running.
 
 **What is serialized:** BPM, base octave, scale/root, wave1/wave2, volume1/volume2,
-both melodic sequencers (steps + num_steps), drum machine (num_steps, swing, all 8
-tracks with steps/muted/volume), all effect parameters (reverb, delay, distortion,
-sidechain, filter1, filter2), and all 9 FX routing send levels.
+chord1/chord2 (index into ChordType::ALL), both melodic sequencers (steps + num_steps),
+drum machine (num_steps, swing, all 8 tracks with steps/muted/volume), all effect parameters
+(reverb, delay, distortion, sidechain, filter1, filter2), all 9 FX routing send levels,
+and all 4 pattern banks for each of Seq1, Seq2, and Drums (seq1_bank/seq2_bank/drum_bank
+indices + seq1_banks/seq2_banks/drum_banks arrays).
 
 **Format:** human-readable pretty-printed JSON via `serde_json`.  The file can be
 hand-edited.  `DrumKind`, `WaveType`, and `FilterMode` are stored as integer indices

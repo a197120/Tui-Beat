@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use crate::app::{App, AppMode, InputMode};
 use crate::drums::DrumKind;
 use crate::effects::FilterMode;
-use crate::synth::note_name;
+use crate::synth::{ChordType, note_name};
 
 // ── Top-level routing ─────────────────────────────────────────────────────────
 
@@ -278,15 +278,16 @@ fn render_piano_widget(f: &mut Frame, area: Rect, base_octave: i32, active: &Has
 fn draw_synth_seq(f: &mut Frame, area: Rect, app: &App) {
     let focused = app.mode == AppMode::SynthSeq;
     let title = if focused {
-        " ► Synth Seq — [←→] Cursor  [↑↓] BPM  [Enter/Space] Play  [Del] Clear  []] Steps  [-=] Vol  [[{] Oct "
+        " ► Synth Seq — [←→] Cursor  [↑↓] BPM  [Enter/Space] Play  [Del] Clear  []] Steps  [-=] Vol  [[{] Oct  [F8] Chord  [F9] Bank "
     } else {
         " Synth Seq "
     };
 
-    let (bpm, num_steps, current_step, playing, steps, volume) = {
+    let (bpm, num_steps, current_step, playing, steps, volume, chord_name) = {
         let s = app.synth.lock().unwrap();
         (s.bpm, s.sequencer.num_steps, s.sequencer.current_step,
-         s.sequencer.playing, s.sequencer.steps.clone(), s.volume)
+         s.sequencer.playing, s.sequencer.steps.clone(), s.volume,
+         s.chord1.name())
     };
     let cursor = app.seq_cursor;
     let mut lines: Vec<Line> = Vec::new();
@@ -306,6 +307,16 @@ fn draw_synth_seq(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("{:.0}%", volume * 100.0), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(format!("Oct:{}", app.base_octave), Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled("Chord: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(chord_name, if chord_name != ChordType::Off.name() {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        }),
+        Span::raw("  "),
+        Span::styled("Bank: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("{}", app.seq1_bank + 1), Style::default().fg(Color::White)),
     ]));
 
     let per_row = if num_steps <= 8 { 8 } else { 16 };
@@ -370,16 +381,17 @@ fn draw_synth_seq(f: &mut Frame, area: Rect, app: &App) {
 fn draw_synth_seq2(f: &mut Frame, area: Rect, app: &App) {
     let focused = app.mode == AppMode::SynthSeq2;
     let title = if focused {
-        " ► Synth Seq 2 — [←→] Cursor  [↑↓] BPM  [Enter/Space] Play  [Del] Clear  []] Steps  [F5] Wave  [-=] Vol  [[{] Oct "
+        " ► Synth Seq 2 — [←→] Cursor  [↑↓] BPM  [Enter/Space] Play  [Del] Clear  []] Steps  [F5] Wave  [-=] Vol  [[{] Oct  [F8] Chord  [F9] Bank "
     } else {
         " Synth Seq 2 "
     };
 
-    let (bpm, num_steps, current_step, playing, steps, wave_name, volume2) = {
+    let (bpm, num_steps, current_step, playing, steps, wave_name, volume2, chord_name) = {
         let s = app.synth.lock().unwrap();
         (s.bpm, s.sequencer2.num_steps, s.sequencer2.current_step,
          s.sequencer2.playing, s.sequencer2.steps.clone(),
-         s.wave_type2.name().to_string(), s.volume2)
+         s.wave_type2.name().to_string(), s.volume2,
+         s.chord2.name())
     };
     let cursor = app.seq2_cursor;
     let mut lines: Vec<Line> = Vec::new();
@@ -402,6 +414,16 @@ fn draw_synth_seq2(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("{:.0}%", volume2 * 100.0), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(format!("Oct:{}", app.base_octave), Style::default().fg(Color::DarkGray)),
+        Span::raw("  "),
+        Span::styled("Chord: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(chord_name, if chord_name != ChordType::Off.name() {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        }),
+        Span::raw("  "),
+        Span::styled("Bank: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("{}", app.seq2_bank + 1), Style::default().fg(Color::White)),
     ]));
 
     let per_row = if num_steps <= 8 { 8 } else { 16 };
@@ -479,7 +501,7 @@ fn drum_color(kind: DrumKind) -> Color {
 fn draw_drums(f: &mut Frame, area: Rect, app: &App) {
     let focused = app.mode == AppMode::Drums;
     let title = if focused {
-        " ► Drum Machine — [↑↓] Track  [←→] Step  [Space] Toggle  [\\] Mute  [-=] Vol  []] Steps  [p/[] Prob  [e] Euclid "
+        " ► Drum Machine — [↑↓] Track  [←→] Step  [Space] Toggle  [\\] Mute  [-=] Vol  []] Steps  [p/[] Prob  [e] Euclid  [F9] Bank "
     } else {
         " Drum Machine "
     };
@@ -517,6 +539,9 @@ fn draw_drums(f: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(Color::DarkGray)
             },
         ),
+        Span::raw("  "),
+        Span::styled("Bank: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("{}", app.drum_bank + 1), Style::default().fg(Color::White)),
     ]));
 
     {
@@ -956,6 +981,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[PgUp/Dn] ",w), Span::raw("BPM  │  "),
         Span::styled("[F6] ",     w), Span::raw("Scale  │  "),
         Span::styled("[F7] ",     w), Span::raw("Root  │  "),
+        Span::styled("[F8] ",     w), Span::raw("Chord  │  "),
+        Span::styled("[F9] ",     w), Span::raw("Bank  │  "),
         Span::styled("[^S] ",     w), Span::raw("Save  │  "),
         Span::styled("[^L] ",     w), Span::raw("Load  │  "),
         Span::styled("[Esc] ",    w), Span::raw("Quit"),

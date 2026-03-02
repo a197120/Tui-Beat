@@ -10,6 +10,53 @@ use crate::sequencer::Sequencer;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WaveType { Sine, Square, Sawtooth, Triangle }
 
+// ── Chord mode ────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChordType { Off, Major, Minor, Maj7, Min7, Dom7, Oct }
+
+impl ChordType {
+    pub const ALL: [ChordType; 7] = [
+        Self::Off, Self::Major, Self::Minor, Self::Maj7, Self::Min7, Self::Dom7, Self::Oct,
+    ];
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off   => Self::Major,
+            Self::Major => Self::Minor,
+            Self::Minor => Self::Maj7,
+            Self::Maj7  => Self::Min7,
+            Self::Min7  => Self::Dom7,
+            Self::Dom7  => Self::Oct,
+            Self::Oct   => Self::Off,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Off   => "Off",
+            Self::Major => "Maj",
+            Self::Minor => "Min",
+            Self::Maj7  => "Maj7",
+            Self::Min7  => "Min7",
+            Self::Dom7  => "7th",
+            Self::Oct   => "Oct",
+        }
+    }
+
+    pub fn intervals(self) -> &'static [i32] {
+        match self {
+            Self::Off   => &[],
+            Self::Major => &[4, 7],
+            Self::Minor => &[3, 7],
+            Self::Maj7  => &[4, 7, 11],
+            Self::Min7  => &[3, 7, 10],
+            Self::Dom7  => &[4, 7, 10],
+            Self::Oct   => &[12],
+        }
+    }
+}
+
 impl WaveType {
     pub fn next(self) -> Self {
         match self {
@@ -176,6 +223,10 @@ pub struct Synth {
     // ── Per-instrument send routing ───────────────────────────────────────
     pub fx_routing: FxRouting,
 
+    // ── Chord mode ────────────────────────────────────────────────────────
+    pub chord1: ChordType,
+    pub chord2: ChordType,
+
     // ── Sidechain compressor ──────────────────────────────────────────────
     pub sidechain: Sidechain,
 
@@ -216,6 +267,9 @@ impl Synth {
 
             fx_routing:  FxRouting::new(),
 
+            chord1: ChordType::Off,
+            chord2: ChordType::Off,
+
             sidechain:  Sidechain::new(),
             scope_buf:  vec![0.0f32; 512],
             scope_pos:  0,
@@ -226,10 +280,18 @@ impl Synth {
 
     pub fn note_on(&mut self, note: u8) {
         self.voices.insert(note, Voice::new(note));
+        for &iv in self.chord1.intervals() {
+            let cn = (note as i32 + iv).clamp(0, 127) as u8;
+            self.voices.insert(cn, Voice::new(cn));
+        }
     }
 
     pub fn note_off(&mut self, note: u8) {
         if let Some(v) = self.voices.get_mut(&note) { v.release(); }
+        for &iv in self.chord1.intervals() {
+            let cn = (note as i32 + iv).clamp(0, 127) as u8;
+            if let Some(v) = self.voices.get_mut(&cn) { v.release(); }
+        }
     }
 
     pub fn active_notes(&self) -> Vec<u8> {
@@ -238,13 +300,20 @@ impl Synth {
 
     // ── Synth 2 note control ──────────────────────────────────────────────
 
-    #[allow(dead_code)]
     pub fn note_on2(&mut self, note: u8) {
         self.voices2.insert(note, Voice::new(note));
+        for &iv in self.chord2.intervals() {
+            let cn = (note as i32 + iv).clamp(0, 127) as u8;
+            self.voices2.insert(cn, Voice::new(cn));
+        }
     }
 
     pub fn note_off2(&mut self, note: u8) {
         if let Some(v) = self.voices2.get_mut(&note) { v.release(); }
+        for &iv in self.chord2.intervals() {
+            let cn = (note as i32 + iv).clamp(0, 127) as u8;
+            if let Some(v) = self.voices2.get_mut(&cn) { v.release(); }
+        }
     }
 
     #[allow(dead_code)]
@@ -260,14 +329,14 @@ impl Synth {
 
         // ── Sequencer 1 ───────────────────────────────────────────────────
         if let Some(ev) = self.sequencer.tick(self.bpm, clock) {
-            if let Some(n) = ev.note_off { if let Some(v) = self.voices.get_mut(&n) { v.release(); } }
-            if let Some(n) = ev.note_on  { self.voices.insert(n, Voice::new(n)); }
+            if let Some(n) = ev.note_off { self.note_off(n); }
+            if let Some(n) = ev.note_on  { self.note_on(n); }
         }
 
         // ── Sequencer 2 ───────────────────────────────────────────────────
         if let Some(ev) = self.sequencer2.tick(self.bpm, clock) {
-            if let Some(n) = ev.note_off { if let Some(v) = self.voices2.get_mut(&n) { v.release(); } }
-            if let Some(n) = ev.note_on  { self.voices2.insert(n, Voice::new(n)); }
+            if let Some(n) = ev.note_off { self.note_off2(n); }
+            if let Some(n) = ev.note_on  { self.note_on2(n); }
         }
 
         // ── Melodic bus 1 ─────────────────────────────────────────────────

@@ -7,7 +7,7 @@ use crate::effects::FilterMode;
 use crate::save::{DelaySave, DistSave, DrumsSave, FilterSave, ReverbSave, RoutingSave,
                   SaveFile, SeqSave, SidechainSave, TrackSave};
 use crate::scale::{Scale, ScaleQuantizer};
-use crate::synth::{Synth, WaveType, note_name};
+use crate::synth::{ChordType, Synth, WaveType, note_name};
 
 const FALLBACK_RELEASE_THRESHOLD: Duration = Duration::from_millis(600);
 
@@ -33,6 +33,33 @@ pub fn key_to_note(key: char, base_octave: i32) -> Option<u8> {
     };
     let note = (base_octave + oct) * 12 + 12 + st;
     if (0..=127).contains(&note) { Some(note as u8) } else { None }
+}
+
+// ── Pattern bank types ────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct SeqPattern {
+    steps:     Vec<Option<u8>>,
+    num_steps: usize,
+}
+
+impl SeqPattern {
+    fn empty() -> Self {
+        Self { steps: vec![None; 16], num_steps: 16 }
+    }
+}
+
+#[derive(Clone)]
+struct DrumPattern {
+    num_steps:   usize,
+    swing:       f32,
+    track_steps: Vec<Vec<u8>>,  // 8 tracks × up to 32 steps
+}
+
+impl DrumPattern {
+    fn empty() -> Self {
+        Self { num_steps: 16, swing: 0.0, track_steps: vec![vec![0u8; 16]; 8] }
+    }
 }
 
 // ── App mode ──────────────────────────────────────────────────────────────────
@@ -90,6 +117,14 @@ pub struct App {
     // Scale quantizer (input layer — no audio thread involvement)
     pub scale_q: ScaleQuantizer,
 
+    // Pattern banks (stored on App; swapped into live Sequencer/DrumMachine on switch)
+    seq1_banks:   [SeqPattern;  4],
+    pub seq1_bank: usize,
+    seq2_banks:   [SeqPattern;  4],
+    pub seq2_bank: usize,
+    drum_banks:   [DrumPattern; 4],
+    pub drum_bank: usize,
+
     // File path prompt state
     pub input_mode: InputMode,
     pub input_buf:  String,
@@ -113,6 +148,12 @@ impl App {
             effects_sel:   0,
             effects_param: 0,
             scale_q:       ScaleQuantizer::new(),
+            seq1_banks:    std::array::from_fn(|_| SeqPattern::empty()),
+            seq1_bank:     0,
+            seq2_banks:    std::array::from_fn(|_| SeqPattern::empty()),
+            seq2_bank:     0,
+            drum_banks:    std::array::from_fn(|_| DrumPattern::empty()),
+            drum_bank:     0,
             input_mode:    InputMode::None,
             input_buf:     String::new(),
         }
@@ -248,6 +289,91 @@ impl App {
         } else {
             format!("Scale: {} {}", self.scale_q.root_name(), self.scale_q.scale.name())
         };
+    }
+
+    pub fn cycle_chord1(&mut self) {
+        let mut s = self.synth.lock().unwrap();
+        s.chord1 = s.chord1.next();
+        self.status_msg = format!("S1 Chord: {}", s.chord1.name());
+    }
+
+    pub fn cycle_chord2(&mut self) {
+        let mut s = self.synth.lock().unwrap();
+        s.chord2 = s.chord2.next();
+        self.status_msg = format!("S2 Chord: {}", s.chord2.name());
+    }
+
+    pub fn switch_seq1_bank(&mut self, new_bank: usize) {
+        if new_bank == self.seq1_bank { return; }
+        {
+            let s = self.synth.lock().unwrap();
+            self.seq1_banks[self.seq1_bank] = SeqPattern {
+                steps:     s.sequencer.steps.clone(),
+                num_steps: s.sequencer.num_steps,
+            };
+        }
+        self.seq1_bank = new_bank;
+        {
+            let mut s = self.synth.lock().unwrap();
+            let p = &self.seq1_banks[new_bank];
+            s.sequencer.steps = p.steps.clone();
+            s.sequencer.num_steps = p.num_steps;
+        }
+        if self.seq_cursor >= self.seq1_banks[new_bank].num_steps {
+            self.seq_cursor = 0;
+        }
+        self.status_msg = format!("Seq1 Bank: {}", new_bank + 1);
+    }
+
+    pub fn switch_seq2_bank(&mut self, new_bank: usize) {
+        if new_bank == self.seq2_bank { return; }
+        {
+            let s = self.synth.lock().unwrap();
+            self.seq2_banks[self.seq2_bank] = SeqPattern {
+                steps:     s.sequencer2.steps.clone(),
+                num_steps: s.sequencer2.num_steps,
+            };
+        }
+        self.seq2_bank = new_bank;
+        {
+            let mut s = self.synth.lock().unwrap();
+            let p = &self.seq2_banks[new_bank];
+            s.sequencer2.steps = p.steps.clone();
+            s.sequencer2.num_steps = p.num_steps;
+        }
+        if self.seq2_cursor >= self.seq2_banks[new_bank].num_steps {
+            self.seq2_cursor = 0;
+        }
+        self.status_msg = format!("Seq2 Bank: {}", new_bank + 1);
+    }
+
+    pub fn switch_drum_bank(&mut self, new_bank: usize) {
+        if new_bank == self.drum_bank { return; }
+        {
+            let s = self.synth.lock().unwrap();
+            let dm = &s.drum_machine;
+            self.drum_banks[self.drum_bank] = DrumPattern {
+                num_steps:   dm.num_steps,
+                swing:       dm.swing,
+                track_steps: dm.tracks.iter().map(|t| t.steps.clone()).collect(),
+            };
+        }
+        self.drum_bank = new_bank;
+        {
+            let mut s = self.synth.lock().unwrap();
+            let p = &self.drum_banks[new_bank];
+            s.drum_machine.num_steps = p.num_steps;
+            s.drum_machine.swing = p.swing;
+            let n_tracks = s.drum_machine.tracks.len().min(p.track_steps.len());
+            for i in 0..n_tracks {
+                s.drum_machine.tracks[i].steps = p.track_steps[i].clone();
+                s.drum_machine.tracks[i].steps.resize(p.num_steps, 0);
+            }
+        }
+        if self.drum_step >= self.drum_banks[new_bank].num_steps {
+            self.drum_step = 0;
+        }
+        self.status_msg = format!("Drum Bank: {}", new_bank + 1);
     }
 
     pub fn refresh_active_notes(&mut self) {
@@ -781,6 +907,8 @@ impl App {
         if s.sidechain.enabled  { ind.push_str("  ▶SC"); }
         if s.filter1.enabled    { ind.push_str("  ▶F1"); }
         if s.filter2.enabled    { ind.push_str("  ▶F2"); }
+        if s.chord1 != ChordType::Off { ind.push_str("  ▶C1"); }
+        if s.chord2 != ChordType::Off { ind.push_str("  ▶C2"); }
         ind
     }
 
@@ -801,6 +929,49 @@ impl App {
             .position(|&sc| sc == self.scale_q.scale)
             .unwrap_or(0) as u8;
         let scale_root = self.scale_q.root;
+
+        // Step 1: Flush live state into current bank slots + read track metadata.
+        let (track_kinds, track_muted, track_volumes) = {
+            let s = self.synth.lock().unwrap();
+            self.seq1_banks[self.seq1_bank] = SeqPattern {
+                steps:     s.sequencer.steps.clone(),
+                num_steps: s.sequencer.num_steps,
+            };
+            self.seq2_banks[self.seq2_bank] = SeqPattern {
+                steps:     s.sequencer2.steps.clone(),
+                num_steps: s.sequencer2.num_steps,
+            };
+            self.drum_banks[self.drum_bank] = DrumPattern {
+                num_steps:   s.drum_machine.num_steps,
+                swing:       s.drum_machine.swing,
+                track_steps: s.drum_machine.tracks.iter().map(|t| t.steps.clone()).collect(),
+            };
+            let kinds: Vec<u8> = s.drum_machine.tracks.iter()
+                .map(|t| DrumKind::ALL.iter().position(|&k| k == t.kind).unwrap_or(0) as u8)
+                .collect();
+            let muted:   Vec<bool> = s.drum_machine.tracks.iter().map(|t| t.muted).collect();
+            let volumes: Vec<f32>  = s.drum_machine.tracks.iter().map(|t| t.volume).collect();
+            (kinds, muted, volumes)
+        };
+
+        // Step 2: Serialize bank arrays (no lock needed — data is now in self.*_banks).
+        let seq1_banks_save: Vec<SeqSave> = self.seq1_banks.iter().map(|p| SeqSave {
+            num_steps: p.num_steps,
+            steps:     p.steps.clone(),
+        }).collect();
+        let seq2_banks_save: Vec<SeqSave> = self.seq2_banks.iter().map(|p| SeqSave {
+            num_steps: p.num_steps,
+            steps:     p.steps.clone(),
+        }).collect();
+        let drum_banks_save: Vec<DrumsSave> = self.drum_banks.iter().map(|p| {
+            let tracks = p.track_steps.iter().enumerate().map(|(i, steps)| TrackSave {
+                kind:   track_kinds.get(i).copied().unwrap_or(0),
+                steps:  steps.clone(),
+                muted:  track_muted.get(i).copied().unwrap_or(false),
+                volume: track_volumes.get(i).copied().unwrap_or(0.85),
+            }).collect();
+            DrumsSave { num_steps: p.num_steps, swing: p.swing, tracks }
+        }).collect();
 
         let sf = {
             let s = self.synth.lock().unwrap();
@@ -868,6 +1039,11 @@ impl App {
                 dr_reverb: s.fx_routing.dr_reverb, dr_delay: s.fx_routing.dr_delay, dr_dist: s.fx_routing.dr_dist,
             };
 
+            let chord1_idx = ChordType::ALL.iter()
+                .position(|&c| c == s.chord1).unwrap_or(0) as u8;
+            let chord2_idx = ChordType::ALL.iter()
+                .position(|&c| c == s.chord2).unwrap_or(0) as u8;
+
             SaveFile {
                 bpm:        s.bpm,
                 base_octave,
@@ -880,6 +1056,14 @@ impl App {
                 seq1, seq2, drums,
                 reverb, delay, distortion, sidechain,
                 filter1, filter2, routing,
+                chord1: chord1_idx,
+                chord2: chord2_idx,
+                seq1_bank: self.seq1_bank,
+                seq2_bank: self.seq2_bank,
+                drum_bank: self.drum_bank,
+                seq1_banks: seq1_banks_save,
+                seq2_banks: seq2_banks_save,
+                drum_banks: drum_banks_save,
             }
         };
 
@@ -921,25 +1105,47 @@ impl App {
             s.volume  = sf.volume.clamp(0.0, 1.0);
             s.volume2 = sf.volume2.clamp(0.0, 1.0);
 
-            // Sequencer 1
-            let n1 = sf.seq1.num_steps.clamp(1, 32);
+            // Chord types
+            s.chord1 = ChordType::ALL.get(sf.chord1 as usize).copied().unwrap_or(ChordType::Off);
+            s.chord2 = ChordType::ALL.get(sf.chord2 as usize).copied().unwrap_or(ChordType::Off);
+
+            // Sequencer 1 — use active bank if available, else use seq1 field
+            let (n1, seq1_steps) = if !sf.seq1_banks.is_empty() {
+                let active = sf.seq1_bank.min(sf.seq1_banks.len() - 1);
+                let sb = &sf.seq1_banks[active];
+                (sb.num_steps.clamp(1, 32), sb.steps.clone())
+            } else {
+                (sf.seq1.num_steps.clamp(1, 32), sf.seq1.steps.clone())
+            };
             s.sequencer.num_steps = n1;
-            s.sequencer.steps = sf.seq1.steps;
+            s.sequencer.steps = seq1_steps;
             s.sequencer.steps.resize(n1, None);
 
-            // Sequencer 2
-            let n2 = sf.seq2.num_steps.clamp(1, 32);
+            // Sequencer 2 — use active bank if available, else use seq2 field
+            let (n2, seq2_steps) = if !sf.seq2_banks.is_empty() {
+                let active = sf.seq2_bank.min(sf.seq2_banks.len() - 1);
+                let sb = &sf.seq2_banks[active];
+                (sb.num_steps.clamp(1, 32), sb.steps.clone())
+            } else {
+                (sf.seq2.num_steps.clamp(1, 32), sf.seq2.steps.clone())
+            };
             s.sequencer2.num_steps = n2;
-            s.sequencer2.steps = sf.seq2.steps;
+            s.sequencer2.steps = seq2_steps;
             s.sequencer2.steps.resize(n2, None);
 
-            // Drums
-            let nd = sf.drums.num_steps.clamp(1, 32);
+            // Drums — use active bank if available, else use drums field
+            let drums_src = if !sf.drum_banks.is_empty() {
+                let active = sf.drum_bank.min(sf.drum_banks.len() - 1);
+                &sf.drum_banks[active]
+            } else {
+                &sf.drums
+            };
+            let nd = drums_src.num_steps.clamp(1, 32);
             s.drum_machine.num_steps = nd;
-            s.drum_machine.swing = sf.drums.swing.clamp(0.0, 0.5);
-            let n_tracks = s.drum_machine.tracks.len().min(sf.drums.tracks.len());
+            s.drum_machine.swing = drums_src.swing.clamp(0.0, 0.5);
+            let n_tracks = s.drum_machine.tracks.len().min(drums_src.tracks.len());
             for i in 0..n_tracks {
-                let t = &sf.drums.tracks[i];
+                let t = &drums_src.tracks[i];
                 s.drum_machine.tracks[i].steps = t.steps.clone();
                 s.drum_machine.tracks[i].steps.resize(nd, 0);
                 s.drum_machine.tracks[i].muted  = t.muted;
@@ -1005,6 +1211,42 @@ impl App {
         self.base_octave   = sf.base_octave.clamp(0, 8);
         self.scale_q.scale = Scale::ALL.get(sf.scale as usize).copied().unwrap_or(Scale::Off);
         self.scale_q.root  = sf.scale_root % 12;
+
+        // Restore bank indices
+        self.seq1_bank = sf.seq1_bank.min(3);
+        self.seq2_bank = sf.seq2_bank.min(3);
+        self.drum_bank = sf.drum_bank.min(3);
+
+        // Populate seq1 bank slots
+        let n_seq1 = sf.seq1_banks.len().min(4);
+        for i in 0..n_seq1 {
+            let sb = &sf.seq1_banks[i];
+            self.seq1_banks[i] = SeqPattern {
+                steps:     sb.steps.clone(),
+                num_steps: sb.num_steps.clamp(1, 32),
+            };
+        }
+
+        // Populate seq2 bank slots
+        let n_seq2 = sf.seq2_banks.len().min(4);
+        for i in 0..n_seq2 {
+            let sb = &sf.seq2_banks[i];
+            self.seq2_banks[i] = SeqPattern {
+                steps:     sb.steps.clone(),
+                num_steps: sb.num_steps.clamp(1, 32),
+            };
+        }
+
+        // Populate drum bank slots
+        let n_drum = sf.drum_banks.len().min(4);
+        for i in 0..n_drum {
+            let db = &sf.drum_banks[i];
+            self.drum_banks[i] = DrumPattern {
+                num_steps:   db.num_steps.clamp(1, 32),
+                swing:       db.swing.clamp(0.0, 0.5),
+                track_steps: db.tracks.iter().map(|t| t.steps.clone()).collect(),
+            };
+        }
 
         // Reset cursors
         self.seq_cursor  = 0;

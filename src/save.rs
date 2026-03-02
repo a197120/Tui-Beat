@@ -12,10 +12,13 @@ pub struct SaveFile {
     pub wave2: u8,
     pub volume: f32,
     pub volume2: f32,
-    // Sequencers
+    // Chord mode (index into ChordType::ALL)
+    #[serde(default)] pub chord1: u8,
+    #[serde(default)] pub chord2: u8,
+    // Sequencers (live state — active bank)
     pub seq1: SeqSave,
     pub seq2: SeqSave,
-    // Drums
+    // Drums (live state — active bank)
     pub drums: DrumsSave,
     // Effects
     pub reverb: ReverbSave,
@@ -25,6 +28,13 @@ pub struct SaveFile {
     pub filter1: FilterSave,
     pub filter2: FilterSave,
     pub routing: RoutingSave,
+    // Pattern banks
+    #[serde(default)] pub seq1_bank:  usize,
+    #[serde(default)] pub seq2_bank:  usize,
+    #[serde(default)] pub drum_bank:  usize,
+    #[serde(default)] pub seq1_banks: Vec<SeqSave>,
+    #[serde(default)] pub seq2_banks: Vec<SeqSave>,
+    #[serde(default)] pub drum_banks: Vec<DrumsSave>,
 }
 
 #[derive(Serialize, Deserialize)]

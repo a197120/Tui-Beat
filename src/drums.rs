@@ -200,6 +200,8 @@ pub struct DrumTrack {
     /// Per-track insert effects (e.g. compression, EQ). Empty = passthrough.
     #[allow(dead_code)]
     pub fx: EffectChain,
+    /// Rotation offset incremented each time euclidean_fill is called (transient, not saved).
+    pub euclid_rotation: usize,
 }
 
 impl DrumTrack {
@@ -210,6 +212,7 @@ impl DrumTrack {
             muted: false,
             volume: 0.85,
             fx: EffectChain::new(),
+            euclid_rotation: 0,
         }
     }
 }
@@ -427,12 +430,17 @@ impl DrumMachine {
         let n = self.num_steps;
         if let Some(t) = self.tracks.get_mut(track) {
             let k = k.min(n);
-            t.steps = vec![0u8; n];
+            // Generate canonical Euclidean (Bresenham) pattern.
+            let mut pattern = vec![0u8; n];
             let mut bucket = 0usize;
             for i in 0..n {
                 bucket += k;
-                if bucket >= n { bucket -= n; t.steps[i] = 100; }
+                if bucket >= n { bucket -= n; pattern[i] = 100; }
             }
+            // Rotate by the per-track offset so successive presses produce different results.
+            let rot = t.euclid_rotation % n;
+            t.steps = pattern[rot..].iter().chain(pattern[..rot].iter()).copied().collect();
+            t.euclid_rotation = t.euclid_rotation.wrapping_add(1);
         }
     }
 }
